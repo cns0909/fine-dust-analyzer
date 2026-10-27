@@ -1,281 +1,124 @@
-
-import streamlit as st
-import requests
-import pandas as pd
-from urllib.parse import unquote
-
-st.set_page_config(
-    page_title="미세먼지 분석 도우미",
-    page_icon="🌿",
-    layout="wide"
-)
-
-API_URL = (
-    "https://apis.data.go.kr/B552584/"
-    "ArpltnInforInqireSvc/getMsrstnAcctoRltmMesureDnsty"
-)
-
-
-def get_grade(value, pollutant):
-    """농도를 기준으로 대기질 등급을 구분한다."""
-    if pd.isna(value):
-        return "측정값 없음"
-
-    if pollutant == "PM10":
-        limits = [30, 80, 150]
-    else:
-        limits = [15, 35, 75]
-
-    if value <= limits[0]:
-        return "좋음"
-    elif value <= limits[1]:
-        return "보통"
-    elif value <= limits[2]:
-        return "나쁨"
-    return "매우 나쁨"
-
-
-def get_advice(pm10, pm25):
-    """측정값에 따른 일반적인 대기질 안내."""
-    grades = [
-        get_grade(pm10, "PM10"),
-        get_grade(pm25, "PM25")
-    ]
-
-    if "매우 나쁨" in grades:
-        return "미세먼지 농도가 매우 높아요. 외부 활동을 줄이고 공식 대기질 안내를 확인하세요."
-    elif "나쁨" in grades:
-        return "미세먼지 농도가 높아요. 장시간 야외 활동을 줄이고 대기질 정보를 확인하세요."
-    elif "보통" in grades:
-        return "현재 측정값은 보통 수준이에요. 대기질 변화를 확인하세요."
-    elif "좋음" in grades:
-        return "측정된 미세먼지 농도가 낮은 편이에요."
-    return "측정값이 부족해 상태를 판단하기 어려워요."
-
-
-def fetch_data(api_key, station, period):
-    # URL Encode 키를 입력받았어도 정상적으로 요청하도록 처리
-    api_key = unquote(api_key.strip())
-
-    params = {
-        "serviceKey": api_key,
-        "returnType": "json",
-        "numOfRows": 100,
-        "pageNo": 1,
-        "stationName": station.strip(),
-        "dataTerm": period,
-        "ver": "1.0"
-    }
-
-    response = requests.get(
-        API_URL,
-        params=params,
-        timeout=20
-    )
-    response.raise_for_status()
-
-    result = response.json()
-    body = result.get("response", {}).get("body", {})
-    header = result.get("response", {}).get("header", {})
-
-    result_code = str(header.get("resultCode", ""))
-
-    if result_code and result_code != "00":
-        message = header.get("resultMsg", "API 요청 오류")
-        raise ValueError(f"{result_code}: {message}")
-
-    items = body.get("items", [])
-
-    if isinstance(items, dict):
-        items = [items]
-
-    if not items:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(items)
-
-    for column in ["pm10Value", "pm25Value"]:
-        if column not in df.columns:
-            df[column] = None
-
-        df[column] = pd.to_numeric(
-            df[column].replace("-", None),
-            errors="coerce"
-        )
-
-    if "dataTime" in df.columns:
-        df["dataTime"] = pd.to_datetime(
-            df["dataTime"],
-            errors="coerce"
-        )
-
-    df = df.dropna(subset=["dataTime"])
-    df = df.sort_values("dataTime")
-
-    return df
-
-
-st.title("🌿 미세먼지 분석 도우미")
-st.write(
-    "에어코리아 API의 측정 자료를 이용해 "
-    "미세먼지와 초미세먼지의 농도를 분석합니다."
-)
-st.caption("자료 출처: 한국환경공단 에어코리아 OpenAPI")
-
-st.divider()
-
-with st.sidebar:
-    st.header("🔎 검색 설정")
-
-    station = st.text_input(
-        "측정소 이름",
-        value="종로구",
-        help="예: 종로구. 실제 측정소 이름을 입력하세요."
-    )
-
-    period_label = st.selectbox(
-        "조회 기간",
-        ["최근 1일", "최근 1개월", "최근 3개월"]
-    )
-
-    period_map = {
-        "최근 1일": "DAILY",
-        "최근 1개월": "MONTH",
-        "최근 3개월": "3MONTH"
-    }
-
-    st.caption(
-        "조회 가능한 기간과 자료 수는 API 제공 조건에 따라 달라질 수 있어요."
-    )
-
-    search_button = st.button(
-        "미세먼지 조회",
-        type="primary",
-        use_container_width=True
-    )
-
-if search_button:
-    if not station.strip():
-        st.warning("측정소 이름을 입력해 주세요.")
-    elif "AIRKOREA_API_KEY" not in st.secrets:
-        st.error(
-            "API 인증키가 설정되지 않았어요. "
-            "Streamlit Cloud의 Settings → Secrets에 인증키를 등록해 주세요."
-        )
-    else:
-        try:
-            with st.spinner("측정 자료를 불러오는 중이에요..."):
-                df = fetch_data(
-                    st.secrets["AIRKOREA_API_KEY"],
-                    station,
-                    period_map[period_label]
+                    "표시된 값은 API가 반환한 측정값이야. 최신값의 의미는 API 응답의 정렬 순서와 측정 시각을 함께 확인해 줘."
                 )
 
-            if df.empty:
-                st.warning(
-                    "조회된 자료가 없어요. "
-                    "측정소 이름이나 조회 기간을 확인해 주세요."
-                )
-            else:
-                st.session_state["air_data"] = df
-                st.session_state["air_station"] = station.strip()
+elif section == "금속 성분 측정 결과":
+    st.subheader("대기 중 금속 성분 측정 결과")
+    st.write(
+        "날짜와 코드 값을 입력해 금속 성분 측정 자료를 조회해. "
+        "성분 코드와 측정소 코드의 정확한 의미는 해당 API의 코드표에서 확인해야 해."
+    )
 
-        except requests.exceptions.Timeout:
-            st.error("서버 응답 시간이 초과되었어요. 잠시 후 다시 시도해 주세요.")
-        except requests.exceptions.HTTPError as e:
-            st.error(f"HTTP 오류가 발생했어요: {e}")
-        except requests.exceptions.RequestException:
-            st.error("인터넷 연결이나 API 서버를 확인해 주세요.")
-        except (ValueError, KeyError) as e:
-            st.error(f"자료를 처리하지 못했어요: {e}")
-        except Exception:
-            st.error(
-                "예상하지 못한 오류가 발생했어요. "
-                "인증키와 API 신청 상태를 확인해 주세요."
+    if not metal_key:
+        st.warning(
+            "METAL_API_KEY가 설정되지 않았어. "
+            "Streamlit Cloud → 앱 설정(Manage app) → Secrets에 금속 API 키를 추가해 줘."
+        )
+    else:
+        with st.form("metal_form"):
+            selected_date = st.date_input(
+                "측정 날짜",
+                value=date(2017, 12, 8),
+                min_value=date(1900, 1, 1),
+                max_value=date.today(),
+                help="최근 날짜에 자료가 없을 수 있어. 먼저 자료가 확인된 날짜로 테스트할 수 있어.",
             )
+            col1, col2 = st.columns(2)
+            station_code = col1.text_input("측정소 코드", value="1")
+            item_code = col2.text_input("성분 코드", value="90303")
+            time_code = st.selectbox(
+                "시간 구분 코드",
+                ["RH02", "RH24"],
+                format_func=lambda x: (
+                    "RH02 (2시간 평균)" if x == "RH02" else "RH24 (24시간 평균)"
+                ),
+            )
+            metal_submitted = st.form_submit_button("금속 성분 조회", type="primary")
 
-if "air_data" in st.session_state:
-    df = st.session_state["air_data"].copy()
-    station_name = st.session_state["air_station"]
+        if metal_submitted:
+            if not station_code.strip() or not item_code.strip():
+                st.error("측정소 코드와 성분 코드를 입력해 줘.")
+            else:
+                try:
+                    with st.spinner("금속 성분 자료를 불러오는 중..."):
+                        metal_df = fetch_metal_data(
+                            metal_key,
+                            selected_date,
+                            station_code,
+                            item_code,
+                            time_code,
+                        )
+                    st.session_state["metal_df"] = metal_df
+                    st.session_state["metal_query"] = {
+                        "date": selected_date.isoformat(),
+                        "station": station_code,
+                        "item": item_code,
+                        "time": time_code,
+                    }
+                except Exception as exc:
+                    st.error(f"금속 성분 자료를 불러오지 못했어: {exc}")
 
-    latest = df.iloc[-1]
-    pm10 = latest["pm10Value"]
-    pm25 = latest["pm25Value"]
-
-    st.subheader(f"📍 {station_name} 측정 결과")
-    st.caption(
-        "최근 측정 시각: "
-        + latest["dataTime"].strftime("%Y-%m-%d %H:%M")
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.metric(
-            "미세먼지 PM10",
-            f"{pm10:.0f} µg/m³" if pd.notna(pm10) else "측정값 없음"
-        )
-        st.write(
-            f"등급: **{get_grade(pm10, 'PM10')}**"
-        )
-
-    with col2:
-        st.metric(
-            "초미세먼지 PM2.5",
-            f"{pm25:.0f} µg/m³" if pd.notna(pm25) else "측정값 없음"
-        )
-        st.write(
-            f"등급: **{get_grade(pm25, 'PM25')}**"
-        )
-
-    st.info(get_advice(pm10, pm25))
-
-    st.divider()
-    st.subheader("📈 시간별 농도 변화")
-
-    chart_df = df.set_index("dataTime")[
-        ["pm10Value", "pm25Value"]
-    ].rename(
-        columns={
-            "pm10Value": "PM10 미세먼지",
-            "pm25Value": "PM2.5 초미세먼지"
-        }
-    )
-
-    st.line_chart(chart_df, height=350)
-    st.caption("※ 두 측정값은 모두 µg/m³ 단위이며, 세로축은 농도를 나타냅니다.")
-
-    st.subheader("📋 측정 자료")
-
-    table_df = df[["dataTime", "pm10Value", "pm25Value"]].copy()
-    table_df.columns = ["측정 시각", "PM10 (µg/m³)", "PM2.5 (µg/m³)"]
-    table_df = table_df.sort_values("측정 시각", ascending=False)
-
-    st.dataframe(table_df, use_container_width=True)
-
-    csv_data = table_df.to_csv(
-        index=False
-    ).encode("utf-8-sig")
-
-    st.download_button(
-        "📥 측정 자료 CSV 다운로드",
-        data=csv_data,
-        file_name="airkorea_measurements.csv",
-        mime="text/csv"
-    )
-
-    st.caption(
-        "참고: 이 프로그램은 측정 농도를 보여 줍니다. "
-        "화학적 성분의 종류나 함량은 이 자료만으로 알 수 없습니다."
-    )
+        metal_df = st.session_state.get("metal_df")
+        if metal_df is not None:
+            query_info = st.session_state.get("metal_query", {})
+            st.caption(
+                f"조회 조건: 날짜 {query_info.get('date', '-')}, "
+                f"측정소 코드 {query_info.get('station', '-')}, "
+                f"성분 코드 {query_info.get('item', '-')}, "
+                f"시간 구분 {query_info.get('time', '-')}"
+            )
+            if metal_df.empty:
+                st.info("해당 조건의 자료가 없어. 날짜나 코드를 바꿔서 다시 조회해 줘.")
+            else:
+                st.success(f"금속 성분 측정 자료 {len(metal_df)}건을 불러왔어.")
+                if "SDATE" in metal_df.columns and "VALUE" in metal_df.columns:
+                    plot_df = metal_df.dropna(subset=["SDATE", "VALUE"]).set_index("SDATE")
+                    if not plot_df.empty:
+                        st.markdown("#### 측정 시각별 측정값")
+                        st.line_chart(plot_df[["VALUE"]])
+                if "VALUE" in metal_df.columns:
+                    vals = metal_df["VALUE"].dropna()
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("자료 수", f"{len(vals)}건")
+                    c2.metric("평균값", f"{vals.mean():.4g}" if len(vals) else "자료 없음")
+                    c3.metric("최댓값", f"{vals.max():.4g}" if len(vals) else "자료 없음")
+                st.markdown("#### 원본 측정 자료")
+                st.dataframe(metal_df, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "📥 금속 성분 CSV 다운로드",
+                    data=csv_bytes(metal_df),
+                    file_name="metal_measurement_data.csv",
+                    mime="text/csv",
+                )
+                st.caption(
+                    "VALUE의 단위와 ITEMCODE의 금속 이름은 코드표·API 설명에서 확인한 뒤 보고서에 적어 줘. "
+                    "코드만으로 금속 종류나 단위를 추정하면 안 돼."
+                )
 
 else:
-    st.info(
-        "왼쪽에서 측정소 이름과 조회 기간을 선택한 다음 "
-        "'미세먼지 조회'를 눌러 주세요."
+    st.subheader("🧪 화학 개념 알아보기")
+    st.markdown(
+        """
+        ### 1. 미세먼지와 초미세먼지
+        - **PM10**은 일반적으로 공기역학적 직경이 10 µm 이하인 입자상 물질을 뜻해.
+        - **PM2.5**는 공기역학적 직경이 2.5 µm 이하인 더 작은 입자상 물질을 뜻해.
+        - 미세먼지는 여러 물질이 섞인 혼합물이라서, 농도만으로 모든 성분을 알아낼 수는 없어.
+
+        ### 2. 금속 성분 측정이 필요한 이유
+        - 대기 입자에는 금속을 포함한 여러 성분이 존재할 수 있어.
+        - 금속 성분 자료를 미세먼지 농도와 함께 살펴보면 대기오염의 특성을 더 구체적으로 탐구할 수 있어.
+        - 다만 두 자료의 측정소, 날짜, 측정 시간, 단위가 서로 맞는지 먼저 확인해야 해.
+
+        ### 3. 자료를 해석할 때 주의할 점
+        - 값이 높다고 해서 특정 오염원이 원인이라고 바로 결론 내릴 수는 없어.
+        - 금속 성분 코드, 측정소 코드, 시간 구분 코드, 측정 단위는 API의 공식 설명이나 코드표를 확인해야 해.
+        - 날짜가 최근이어도 자료가 아직 공개되지 않았을 수 있어. 자료가 없다는 것이 농도가 0이라는 뜻은 아니야.
+
+        ### 탐구 질문 예시
+        **“미세먼지 농도 변화와 특정 금속 성분 측정값은 어떤 관계를 보일까?”**
+
+        같은 날짜와 시간대의 자료를 모아 그래프로 비교하고, 관찰된 경향과 자료의 한계를 함께 정리해 볼 수 있어.
+        """
     )
 
 st.divider()
-st.caption(
-    "본 프로그램은 교육용이며, 측정값은 측정소와 시간에 따라 달라질 수 있습니다."
-)
+st.caption("자료 출처: AirKorea 및 공공데이터포털의 금속 성분 측정 API. 결과는 API의 실제 응답에 따라 달라질 수 있어.")
