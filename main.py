@@ -13,7 +13,8 @@ st.set_page_config(
 
 AIR_API_URL = (
     "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/"
-    "getMsrstnAcctoRltmMesure"
+    "getMsrstnAcctoRltmMesureDnsty"
+)
 )
 METAL_API_URL = (
     "https://apis.data.go.kr/1480523/MetalMeasuringResultService/MetalService"
